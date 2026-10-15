@@ -4,7 +4,9 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
+import wave
 from pathlib import Path
 
 
@@ -48,6 +50,7 @@ class WaitingDots:
 
 VOICES_URL = "https://rhasspy.github.io/piper-samples"
 VOICE_NAME = re.compile(r"^[^-]+_[^-]+-[^-]+-.+$")
+AUDIO_SUFFIXES = {".mp3", ".wav"}
 
 
 def default_voices_dir() -> Path:
@@ -97,7 +100,68 @@ def ensure_voice(voice: str, voices_dir: Path | None = None) -> Path:
     return voices_dir
 
 
-def pdf_to_speech(pdf_path: Path, output_path: Path, voice: str, voices_dir: Path):
+def run_piper(text_path: Path, wav_path: Path, voice: str, voices_dir: Path) -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m", "piper",
+            "-m", voice,
+            "-f", str(wav_path),
+            "--input-file", str(text_path),
+            "--data-dir", str(voices_dir),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or "").strip()
+        if detail:
+            print(detail, file=sys.stderr)
+        raise SystemExit(completed.returncode)
+
+
+def wav_to_mp3(wav_path: Path, mp3_path: Path) -> None:
+    """Encode speech audio to MP3. The WAV file is left for the caller to remove."""
+    import lameenc
+
+    with wave.open(str(wav_path), "rb") as wav:
+        rate = wav.getframerate()
+        channels = wav.getnchannels()
+        if wav.getsampwidth() != 2 or channels not in (1, 2) or rate <= 0:
+            raise SystemExit("Could not encode MP3 from the generated audio.")
+
+        encoder = lameenc.Encoder()
+        encoder.set_bit_rate(128)
+        encoder.set_in_sample_rate(rate)
+        encoder.set_channels(channels)
+        encoder.set_quality(2)
+
+        partial = mp3_path.with_name(mp3_path.name + ".part")
+        try:
+            with partial.open("wb") as mp3:
+                while True:
+                    pcm = wav.readframes(rate)
+                    if not pcm:
+                        break
+                    encoded = encoder.encode(pcm)
+                    if encoded:
+                        mp3.write(encoded)
+                tail = encoder.flush()
+                if tail:
+                    mp3.write(tail)
+            partial.replace(mp3_path)
+        finally:
+            partial.unlink(missing_ok=True)
+
+
+def pdf_to_speech(
+    pdf_path: Path,
+    output_path: Path,
+    text_path: Path,
+    voice: str,
+    voices_dir: Path,
+):
     from docling.document_converter import DocumentConverter
 
     logging.basicConfig(level=logging.ERROR)
@@ -110,32 +174,28 @@ def pdf_to_speech(pdf_path: Path, output_path: Path, voice: str, voices_dir: Pat
     if not text:
         raise ValueError("No text could be extracted from the PDF.")
 
-    text_path = output_path.with_suffix(".txt")
+    text_path.parent.mkdir(parents=True, exist_ok=True)
     text_path.write_text(text, encoding="utf-8")
     print(f"Extracted {len(text)} characters.")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with WaitingDots("Generating audio"):
-        completed = subprocess.run(
-            [
-                sys.executable,
-                "-m", "piper",
-                "-m", voice,
-                "-f", str(output_path),
-                "--input-file", str(text_path),
-                "--data-dir", str(voices_dir),
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-    if completed.returncode != 0:
-        detail = (completed.stderr or "").strip()
-        if detail:
-            print(detail, file=sys.stderr)
-        raise SystemExit(completed.returncode)
+        if output_path.suffix.lower() == ".mp3":
+            fd, name = tempfile.mkstemp(
+                prefix=".pdf-to-speech-",
+                suffix=".wav",
+                dir=output_path.parent,
+            )
+            os.close(fd)
+            wav_path = Path(name)
+            try:
+                run_piper(text_path, wav_path, voice, voices_dir)
+                wav_to_mp3(wav_path, output_path)
+            finally:
+                wav_path.unlink(missing_ok=True)
+        else:
+            run_piper(text_path, output_path, voice, voices_dir)
 
     print(f"Audio saved to: {output_path}")
     print(f"Extracted text saved to: {text_path}")
@@ -156,8 +216,9 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=f"""
 examples:
   pdf-to-speech chapter.pdf
-  pdf-to-speech chapter.pdf -o chapter.wav
-  pdf-to-speech chapter.pdf --voice en_US-lessac-medium -o chapter.wav
+  pdf-to-speech chapter.pdf -o audiobook.mp3
+  pdf-to-speech chapter.pdf -o audiobook.wav
+  pdf-to-speech chapter.pdf --voice en_US-lessac-medium
 
 voices:
   The model is downloaded the first time a name is used, then saved for later runs.
@@ -177,9 +238,9 @@ voices:
         "-o",
         "--output",
         type=Path,
-        default=Path("output.wav"),
-        metavar="WAV",
-        help="WAV file to write",
+        default=argparse.SUPPRESS,
+        metavar="FILE",
+        help="Audio file to write, .mp3 or .wav (default: the PDF path with .mp3)",
     )
     parser.add_argument(
         "--voice",
@@ -198,22 +259,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
 
     pdf = args.pdf.expanduser()
-    output = args.output.expanduser()
+    output = getattr(args, "output", None)
+    output = pdf.with_suffix(".mp3") if output is None else output.expanduser()
+    text = pdf.with_suffix(".txt")
     voice = args.voice.strip()
 
     if not pdf.is_file():
         parser.error(f"PDF not found: {pdf}")
     if pdf.suffix.lower() != ".pdf":
         parser.error(f"expected a .pdf file: {pdf}")
+    if output.suffix.lower() not in AUDIO_SUFFIXES:
+        parser.error(f"output must be a .mp3 or .wav file: {output}")
     if not voice:
         parser.error("voice model name cannot be empty")
     if output.exists() and output.is_dir():
         parser.error(f"output path is a directory: {output}")
+    if text.exists() and text.is_dir():
+        parser.error(f"text path is a directory: {text}")
     if pdf.resolve() == output.resolve():
         parser.error("output path must be different from the PDF")
+    if output.resolve() == text.resolve():
+        parser.error("output path must be different from the text file")
 
     args.pdf = pdf
     args.output = output
+    args.text = text
     args.voice = voice
     return args
 
@@ -221,4 +291,4 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     voices_dir = ensure_voice(args.voice)
-    pdf_to_speech(args.pdf, args.output, args.voice, voices_dir)
+    pdf_to_speech(args.pdf, args.output, args.text, args.voice, voices_dir)

@@ -2,7 +2,7 @@
 
 A tiny command-line tool that converts a PDF into high-quality spoken audio.
 
-You give it a PDF. It reads the text aloud and saves a `.wav` file you can play anywhere. It also saves a `.txt` file of the words it read, so you can check them.
+You give it a PDF. It reads the text aloud and saves an audio file you can play anywhere. It also saves a `.txt` file of the words it read, so you can check them.
 
 You need Python 3.12 or newer.
 
@@ -30,18 +30,19 @@ Either one adds a `pdf-to-speech` command you can run from the terminal.
 pdf-to-speech chapter.pdf
 ```
 
-That writes two files in the current folder:
+That writes two files next to the PDF, with the same name:
 
-- `output.wav` is the audio
-- `output.txt` is the text that was read
+- `chapter.mp3` is the audio
+- `chapter.txt` is the text that was read
 
-To choose the audio file name:
+The audio is `.mp3` by default. You can use `.wav` or `.mp3`:
 
 ```bash
-pdf-to-speech chapter.pdf -o chapter.wav
+pdf-to-speech chapter.pdf -o audiobook.mp3
+pdf-to-speech chapter.pdf -o audiobook.wav
 ```
 
-That also writes `chapter.txt` next to the audio.
+The text file stays next to the PDF as `chapter.txt`.
 
 The first run needs an internet connection. It downloads a voice, and reading the PDF can take a few minutes. Later runs reuse what was already downloaded.
 
@@ -52,7 +53,7 @@ A long PDF makes a long audio file. Leave the command running until it says the 
 The default voice is `en_US-lessac-medium`, a clear American English voice.
 
 ```bash
-pdf-to-speech chapter.pdf --voice en_US-lessac-medium -o chapter.wav
+pdf-to-speech chapter.pdf --voice en_US-lessac-medium
 ```
 
 Each voice is downloaded the first time you use it, then kept for next time. Names and samples are listed in the [Piper voice samples](https://rhasspy.github.io/piper-samples).

@@ -1,7 +1,7 @@
 [project]
 name = "pdf-to-speech"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.1.1"
+description = "Read a PDF and write it out as spoken audio."
 readme = "README.md"
 license = "MIT"
 authors = [
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-pdf-to-speech = "pdf_to_speech:main"
+pdf-to-speech = "pdf_to_speech.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.3,<0.13.0"]

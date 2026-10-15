@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -45,12 +46,22 @@ class WaitingDots:
             self._stop.wait(self.interval)
 
 
-VOICES_DIR = Path(__file__).resolve().parent / "voices"
 VOICES_URL = "https://rhasspy.github.io/piper-samples"
 VOICE_NAME = re.compile(r"^[^-]+_[^-]+-[^-]+-.+$")
 
 
-def voice_is_saved(voice: str, voices_dir: Path = VOICES_DIR) -> bool:
+def default_voices_dir() -> Path:
+    """User cache, so a reinstall does not throw away downloaded models."""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Caches"
+    else:
+        base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    return base / "pdf-to-speech" / "voices"
+
+
+def voice_is_saved(voice: str, voices_dir: Path) -> bool:
     for suffix in (".onnx", ".onnx.json"):
         path = voices_dir / f"{voice}{suffix}"
         if not path.is_file() or path.stat().st_size == 0:
@@ -58,8 +69,11 @@ def voice_is_saved(voice: str, voices_dir: Path = VOICES_DIR) -> bool:
     return True
 
 
-def ensure_voice(voice: str, voices_dir: Path = VOICES_DIR) -> Path:
+def ensure_voice(voice: str, voices_dir: Path | None = None) -> Path:
     """Download the voice model on first use and reuse the saved files."""
+    if voices_dir is None:
+        voices_dir = default_voices_dir()
+
     if VOICE_NAME.match(voice) is None:
         raise SystemExit(
             f"Unknown voice name '{voice}'.\n"
@@ -139,7 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pdf-to-speech",
         description="Read a PDF and write it out as spoken audio.",
-        epilog="""
+        epilog=f"""
 examples:
   pdf-to-speech chapter.pdf
   pdf-to-speech chapter.pdf -o chapter.wav
@@ -147,8 +161,9 @@ examples:
 
 voices:
   The model is downloaded the first time a name is used, then saved for later runs.
+  Saved models live in {default_voices_dir()}.
   Find names in the Piper project:
-  https://rhasspy.github.io/piper-samples
+  {VOICES_URL}
         """.strip(),
         formatter_class=HelpFormatter,
     )
@@ -203,7 +218,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
-if __name__ == "__main__":
+def main() -> None:
     args = parse_args()
     voices_dir = ensure_voice(args.voice)
     pdf_to_speech(args.pdf, args.output, args.voice, voices_dir)

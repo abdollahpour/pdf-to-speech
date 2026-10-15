@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editor and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Downloaded Piper voice models
+voices/
+*.onnx
+*.onnx.json
+
+# Inputs and generated output
+*.pdf
+*.wav
+*.mp3
+*.m4a
+*.txt
